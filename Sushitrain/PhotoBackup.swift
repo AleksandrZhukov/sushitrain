@@ -617,40 +617,30 @@ enum PhotoSyncProgress {
 
 				DispatchQueue.main.async { self.progress = .exportingVideos(index: idx, total: videoCount, current: nil) }
 
-				_ = await withCheckedContinuation { resolve in
-					Log.info("Exporting video \(asset.originalFilename)")
-					let options = PHVideoRequestOptions()
-					options.version = .current
-					options.deliveryMode = .highQualityFormat
-
-					PHImageManager.default().requestExportSession(
-						forVideo: asset, options: options, exportPreset: AVAssetExportPresetPassthrough
-					) { exportSession, info in
-						if let es = exportSession {
-							es.outputURL = fileURL
-
-							es.exportAsynchronously {
-								Log.info("Done exporting video \(asset.originalFilename)")
-								resolve.resume(returning: true)
-							}
-						}
-						else {
-							Log.info("Could not start export setting for \(asset.originalFilename): \(String(describing: info))")
-							resolve.resume(returning: false)
-						}
-					}
-				}
-
-				if let cd = asset.creationDate {
-					do {
-						try FileManager.default.setAttributes(
-							[FileAttributeKey.creationDate: cd, FileAttributeKey.modificationDate: cd],
-							ofItemAtPath: fileURL.path(percentEncoded: false))
-					}
-					catch {
-						Log.warn("Could not set creation time of file: \(fileURL) \(error.localizedDescription)")
-					}
-				}
+                do {
+                    try await withCheckedThrowingContinuation { resolve in
+                        Log.info("Copying original video resource for \(asset.originalFilename)")
+                        
+                        guard let resource = asset.primaryResource else {
+                            Log.warn("No primary resource for video \(asset.originalFilename)")
+                            resolve.resume()
+                            return
+                        }
+                        
+                        PHAssetResourceManager.default().writeData(for: resource, toFile: fileURL, options: nil) { error in
+                            if let error = error {
+								Log.warn("Failed to save original video for \(asset.originalFilename): \(error.localizedDescription)")
+                                resolve.resume(throwing: error)
+                            } else {
+                                Log.info("Done copying original video resource for \(asset.originalFilename)")
+                                resolve.resume()
+                            }
+                        }
+                    }
+                } catch {
+                    Log.warn("Failed to save original video for \(asset.originalFilename): \(error.localizedDescription)")
+                    continue
+                }
 
 				selectPaths.append(selectPath)
 				assetsSavedSuccessfully.append(asset)
